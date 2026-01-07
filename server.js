@@ -269,7 +269,7 @@ app.post("/create-payment", async (req, res) => {
     const payload = {
       order_id,
       method_slug: method,
-      amount: Math.round(amountRub * 100), // в копейках
+      amount: amountRub, 
       shop_id: SHOP_ID,
       success_url: `${FRONTEND_URL}/success-pay.html?order=${order_id}`,
       fail_url: `${FRONTEND_URL}/fail.html`,
