@@ -13,12 +13,18 @@ const ADMIN_CHAT_ID = Number(process.env.ADMIN_CHAT_ID);
 const SHOP_ID = Number(process.env.SHOP_ID);
 const BILEE_PASSWORD = process.env.BILEE_PASSWORD;
 
-const RENDER_URL = "https://duck-backend.onrender.com"; // ← если домен другой — поменяй
+// ⚠️ ВАЖНО: укажи СВОЙ render-домен
+const RENDER_URL = "https://duck-backend.onrender.com";
 
 /* ================== APP ================== */
 const app = express();
 app.use(express.json());
 app.use(cors({ origin: "*" }));
+
+/* ===== ROOT ENDPOINT (НУЖЕН RENDER) ===== */
+app.get("/", (req, res) => {
+  res.send("OK");
+});
 
 /* ================== TELEGRAM BOT (WEBHOOK) ================== */
 const bot = new TelegramBot(TG_TOKEN);
@@ -85,9 +91,11 @@ app.post("/create-payment", async (req, res) => {
 
     payload.signature = sign(payload);
 
-    const r = await axios.post(`${BILEE_API}/payment/init`, payload, {
-      timeout: 15000
-    });
+    const r = await axios.post(
+      `${BILEE_API}/payment/init`,
+      payload,
+      { timeout: 15000 }
+    );
 
     res.json({
       url: r.data.url,
@@ -189,6 +197,6 @@ bot.on("callback_query", async q => {
 });
 
 /* ================== START ================== */
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log("Server running on port", PORT);
 });
