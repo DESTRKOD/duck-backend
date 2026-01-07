@@ -4,7 +4,7 @@ import crypto from "crypto";
 import cors from "cors";
 import TelegramBot from "node-telegram-bot-api";
 
-/* ================== НАСТРОЙКИ ================== */
+/* ================== CONFIG ================== */
 const PORT = process.env.PORT || 3000;
 const BILEE_API = "https://paymentgate.bilee.ru/api";
 
@@ -13,19 +13,31 @@ const ADMIN_CHAT_ID = Number(process.env.ADMIN_CHAT_ID);
 const SHOP_ID = Number(process.env.SHOP_ID);
 const BILEE_PASSWORD = process.env.BILEE_PASSWORD;
 
+const RENDER_URL = "https://duck-backend.onrender.com"; // ← если домен другой — поменяй
+
 /* ================== APP ================== */
 const app = express();
 app.use(express.json());
 app.use(cors({ origin: "*" }));
 
-/* ================== BOT ================== */
-const bot = new TelegramBot(TG_TOKEN, { polling: true });
+/* ================== TELEGRAM BOT (WEBHOOK) ================== */
+const bot = new TelegramBot(TG_TOKEN);
 
-/* ================== ХРАНИЛИЩЕ (MVP) ================== */
+const WEBHOOK_PATH = `/telegram/${TG_TOKEN}`;
+const WEBHOOK_URL = `${RENDER_URL}${WEBHOOK_PATH}`;
+
+bot.setWebHook(WEBHOOK_URL);
+
+app.post(WEBHOOK_PATH, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+/* ================== STORAGE (MVP) ================== */
 const orders = {};
 const awaitingCode = {};
 
-/* ================== ПОДПИСЬ BILEEPAY ================== */
+/* ================== BILEEPAY SIGN ================== */
 function sign(data) {
   const tokenData = {
     ...data,
@@ -46,11 +58,10 @@ function sign(data) {
     .digest("hex");
 }
 
-/* ================== СОЗДАНИЕ ПЛАТЕЖА ================== */
+/* ================== CREATE PAYMENT ================== */
 app.post("/create-payment", async (req, res) => {
   try {
     const { items, method } = req.body;
-
     if (!items || !method) {
       return res.status(400).json({ error: "Bad request" });
     }
@@ -74,31 +85,27 @@ app.post("/create-payment", async (req, res) => {
 
     payload.signature = sign(payload);
 
-    const r = await axios.post(
-      `${BILEE_API}/payment/init`,
-      payload,
-      { timeout: 15000 }
-    );
+    const r = await axios.post(`${BILEE_API}/payment/init`, payload, {
+      timeout: 15000
+    });
 
     res.json({
       url: r.data.url,
       order_id
     });
-
   } catch (e) {
     console.error(e.response?.data || e.message);
     res.status(500).json({ error: "Payment init failed" });
   }
 });
 
-/* ================== НОТИФИКАЦИЯ BILEEPAY ================== */
+/* ================== BILEEPAY NOTIFY ================== */
 app.post("/bilee-notify", (req, res) => {
   if (sign(req.body) !== req.body.signature) {
     return res.sendStatus(403);
   }
 
   const { order_id, status } = req.body;
-
   if (orders[order_id]) {
     orders[order_id].status = status;
   }
@@ -106,13 +113,10 @@ app.post("/bilee-notify", (req, res) => {
   res.sendStatus(200);
 });
 
-/* ================== ПОЛУЧЕНИЕ ПОЧТЫ ================== */
+/* ================== SUBMIT EMAIL ================== */
 app.post("/submit-email", async (req, res) => {
   const { order_id, email } = req.body;
-
-  if (!orders[order_id]) {
-    return res.sendStatus(404);
-  }
+  if (!orders[order_id]) return res.sendStatus(404);
 
   orders[order_id].email = email;
 
@@ -122,10 +126,7 @@ app.post("/submit-email", async (req, res) => {
     {
       reply_markup: {
         inline_keyboard: [[
-          {
-            text: "Запрос кода",
-            callback_data: `code_${order_id}`
-          }
+          { text: "Запрос кода", callback_data: `code_${order_id}` }
         ]]
       }
     }
@@ -134,7 +135,7 @@ app.post("/submit-email", async (req, res) => {
   res.sendStatus(200);
 });
 
-/* ================== CALLBACK: ЗАПРОС КОДА ================== */
+/* ================== CALLBACK: REQUEST CODE ================== */
 bot.on("callback_query", async q => {
   if (!q.data.startsWith("code_")) return;
 
@@ -147,7 +148,7 @@ bot.on("callback_query", async q => {
   );
 });
 
-/* ================== ВВОД КОДА ================== */
+/* ================== ADMIN SENDS CODE ================== */
 bot.on("message", async msg => {
   if (msg.chat.id !== ADMIN_CHAT_ID) return;
 
@@ -176,7 +177,7 @@ bot.on("message", async msg => {
   );
 });
 
-/* ================== ГОТОВО / ОШИБКА ================== */
+/* ================== DONE / ERROR ================== */
 bot.on("callback_query", async q => {
   if (q.data.startsWith("ok_")) {
     orders[q.data.slice(3)].status = "done";
