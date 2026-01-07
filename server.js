@@ -14,7 +14,8 @@ const SHOP_ID = Number(process.env.SHOP_ID);
 const BILEE_PASSWORD = process.env.BILEE_PASSWORD;
 
 // ❗ ОБЯЗАТЕЛЬНО ваш render-домен
-const RENDER_URL = "https://duck-backend.onrender.com";
+const RENDER_URL = "https://duck-backend-by9a.onrender.com";
+
 
 /* ================== APP ================== */
 const app = express();
