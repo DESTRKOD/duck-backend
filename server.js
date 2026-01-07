@@ -23,7 +23,7 @@ const bot = new TelegramBot(TG_TOKEN, { polling: true });
 const orders = {};
 
 /* === ПОДПИСЬ === */
-function sign(data) {
+function sign(data) {13:35 07.01.2026
   const values = Object.keys({ ...data, password: BILEE_PASSWORD })
     .filter(k => k !== "signature" && k !== "metadata")
     .sort()
@@ -47,8 +47,8 @@ app.post("/create-payment", async (req, res) => {
     method_slug: method, // card или sbp
     amount,
     shop_id: SHOP_ID,
-    success_url: `https://username.github.io/success-pay.html?order=${order_id}`,
-    fail_url: `https://username.github.io/fail.html`
+    success_url: `https://destrkod.github.io/duck/success-pay.html?order=${order_id}`,
+    fail_url: `https://destrkod.github.io/duck/fail.html`
   };
 
   payload.signature = sign(payload);
