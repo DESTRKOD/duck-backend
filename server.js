@@ -9,12 +9,12 @@ app.use(express.json());
 app.use(cors({ origin: "*" }));
 
 /* === НАСТРОЙКИ === */
-const SHOP_ID = 111;
-const BILEE_PASSWORD = "YJLUMmHfO5u9vHkLchegfGonZpfj9Za1";
 const BILEE_API = "https://paymentgate.bilee.ru/api";
+const TG_TOKEN = process.env.TG_TOKEN;
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
+const SHOP_ID = process.env.SHOP_ID;
+const BILEE_PASSWORD = process.env.BILEE_PASSWORD;
 
-const TG_TOKEN = 8508846271:AAHuYWeNWqk5AfN75ZJMU4kDhgU25c7ohDA
-const ADMIN_CHAT_ID = 2112942356
 
 /* === BOT === */
 const bot = new TelegramBot(TG_TOKEN, { polling: true });
