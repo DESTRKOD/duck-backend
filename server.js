@@ -13,7 +13,7 @@ const ADMIN_CHAT_ID = Number(process.env.ADMIN_CHAT_ID);
 const SHOP_ID = Number(process.env.SHOP_ID);
 const BILEE_PASSWORD = process.env.BILEE_PASSWORD;
 
-// ⚠️ ВАЖНО: укажи СВОЙ render-домен
+// ❗ ОБЯЗАТЕЛЬНО ваш render-домен
 const RENDER_URL = "https://duck-backend.onrender.com";
 
 /* ================== APP ================== */
@@ -21,18 +21,17 @@ const app = express();
 app.use(express.json());
 app.use(cors({ origin: "*" }));
 
-/* ===== ROOT ENDPOINT (НУЖЕН RENDER) ===== */
+/* ===== ROOT ENDPOINT (RENDER HEALTH) ===== */
 app.get("/", (req, res) => {
   res.send("OK");
 });
 
-/* ================== TELEGRAM BOT (WEBHOOK) ================== */
+/* ================== TELEGRAM BOT ================== */
 const bot = new TelegramBot(TG_TOKEN);
 
+/* webhook path */
 const WEBHOOK_PATH = `/telegram/${TG_TOKEN}`;
 const WEBHOOK_URL = `${RENDER_URL}${WEBHOOK_PATH}`;
-
-bot.setWebHook(WEBHOOK_URL);
 
 app.post(WEBHOOK_PATH, (req, res) => {
   bot.processUpdate(req.body);
@@ -197,6 +196,13 @@ bot.on("callback_query", async q => {
 });
 
 /* ================== START ================== */
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, "0.0.0.0", async () => {
   console.log("Server running on port", PORT);
+
+  try {
+    await bot.setWebHook(WEBHOOK_URL);
+    console.log("Telegram webhook set");
+  } catch (e) {
+    console.error("Webhook error:", e.message);
+  }
 });
