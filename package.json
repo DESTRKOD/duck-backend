@@ -12,8 +12,7 @@
     "express": "^4.18.2",
     "axios": "^1.6.2",
     "cors": "^2.8.5",
-    "lowdb": "^6.0.1",
-    "node-telegram-bot-api": "^0.64.0"
+    "lowdb": "^6.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
