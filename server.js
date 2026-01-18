@@ -1,4 +1,3 @@
-
 import express from "express";
 import axios from "axios";
 import crypto from "crypto";
@@ -59,6 +58,7 @@ function calculateOrderTotal(cart) {
   return total;
 }
 
+// =========== УЛУЧШЕННАЯ ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЙ БОТУ ===========
 async function notifyBot(orderData) {
   try {
     if (!BOT_URL || !API_SECRET) {
@@ -66,19 +66,159 @@ async function notifyBot(orderData) {
       return false;
     }
     
-    const response = await axios.post(`${BOT_URL}/api/order-notify`, {
-      ...orderData,
-      secret: API_SECRET
-    }, {
-      timeout: 10000,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    console.log(`📤 =========== ОТПРАВКА УВЕДОМЛЕНИЯ БОТУ ===========`);
+    console.log(`🤖 URL бота: ${BOT_URL}/api/order-notify`);
+    console.log(`📦 Данные заказа:`);
+    console.log(`   🆔 Order ID: ${orderData.order_id}`);
+    console.log(`   📧 Email: ${orderData.email}`);
+    console.log(`   💰 Amount: ${orderData.amount}`);
+    console.log(`   🔢 Code: ${orderData.code || 'null'}`);
+    console.log(`   📊 Stage: ${orderData.stage || 'unknown'}`);
+    console.log(`   🔐 Secret: ${API_SECRET ? 'есть' : 'нет'}`);
+    console.log(`==================================================`);
     
-    console.log(`📤 Уведомление для заказа ${orderData.order_id} отправлено боту`);
-    return response.data.success;
+    // Формируем данные товаров для бота
+    let itemsForBot = {};
+    if (orderData.cart && typeof orderData.cart === 'object') {
+      itemsForBot = orderData.cart;
+    } else if (orderData.items) {
+      itemsForBot = orderData.items;
+    }
+    
+    const requestData = {
+      order_id: orderData.order_id,
+      email: orderData.email,
+      items: itemsForBot,
+      amount: orderData.amount || 0,
+      code: orderData.code || null,
+      stage: orderData.stage || 'email_submitted',
+      secret: API_SECRET,
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log('📤 Отправляю POST запрос боту...');
+    
+    // Пробуем HTTPS
+    let response;
+    try {
+      response = await axios.post(`${BOT_URL}/api/order-notify`, requestData, {
+        timeout: 20000,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      });
+      console.log(`✅ Уведомление отправлено по HTTPS`);
+    } catch (httpsError) {
+      console.log(`❌ HTTPS не сработал: ${httpsError.message}`);
+      
+      // Пробуем HTTP
+      const httpUrl = BOT_URL.replace('https://', 'http://');
+      console.log(`🔄 Пробую HTTP: ${httpUrl}`);
+      
+      try {
+        response = await axios.post(`${httpUrl}/api/order-notify`, requestData, {
+          timeout: 15000,
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }
+        });
+        console.log(`✅ Уведомление отправлено по HTTP`);
+      } catch (httpError) {
+        console.error(`❌ HTTP тоже не сработал: ${httpError.message}`);
+        throw new Error(`Оба протокола не работают: HTTPS - ${httpsError.message}, HTTP - ${httpError.message}`);
+      }
+    }
+    
+    console.log(`📨 Ответ от бота:`, response.data);
+    console.log(`✅ Уведомление для заказа ${orderData.order_id} успешно отправлено`);
+    
+    return response.data.success || true;
     
   } catch (error) {
-    console.error('❌ Ошибка отправки уведомления боту:', error.message);
+    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА отправки уведомления боту:');
+    console.error('Ошибка:', error.message);
+    
+    if (error.response) {
+      console.error('Статус:', error.response.status);
+      console.error('Данные:', error.response.data);
+    }
+    
+    if (error.code) {
+      console.error('Код ошибки:', error.code);
+    }
+    
+    // Не прерываем выполнение, даже если уведомление не отправилось
+    console.log('⚠️ Продолжаю выполнение без уведомления бота');
+    return false;
+  }
+}
+
+// =========== ПРОВЕРКА СОЕДИНЕНИЯ С БОТОМ ПРИ ЗАПУСКЕ ===========
+async function checkBotConnection() {
+  console.log('🔍 =========== ПРОВЕРКА СОЕДИНЕНИЯ С БОТОМ ===========');
+  console.log(`🤖 URL бота: ${BOT_URL}`);
+  console.log(`🔐 API_SECRET: ${API_SECRET ? 'есть' : 'нет'}`);
+  
+  if (!BOT_URL || !API_SECRET) {
+    console.log('❌ BOT_URL или API_SECRET не настроены!');
+    console.log('Уведомления о заказах НЕ будут работать!');
+    console.log('====================================================');
+    return false;
+  }
+  
+  try {
+    console.log('🔄 Проверяю доступность бота...');
+    
+    // Пробуем HTTPS
+    let healthResponse;
+    try {
+      healthResponse = await axios.get(`${BOT_URL}/health`, { timeout: 10000 });
+      console.log(`✅ Бот доступен по HTTPS: ${BOT_URL}`);
+    } catch (httpsError) {
+      console.log(`❌ HTTPS не доступен: ${httpsError.message}`);
+      
+      // Пробуем HTTP
+      const httpUrl = BOT_URL.replace('https://', 'http://');
+      console.log(`🔄 Пробую HTTP: ${httpUrl}`);
+      
+      try {
+        healthResponse = await axios.get(`${httpUrl}/health`, { timeout: 10000 });
+        console.log(`✅ Бот доступен по HTTP: ${httpUrl}`);
+      } catch (httpError) {
+        console.error(`❌ HTTP тоже не доступен: ${httpError.message}`);
+        throw new Error('Бот недоступен по обоим протоколам');
+      }
+    }
+    
+    console.log('📊 Статус бота:', healthResponse.data);
+    
+    // Тест уведомления
+    console.log('🔄 Тестирую отправку уведомления...');
+    const testResult = await notifyBot({
+      order_id: `connection_test_${Date.now()}`,
+      email: "test@example.com",
+      cart: { test_item: 1 },
+      amount: 100,
+      code: "654321",
+      stage: "connection_test"
+    });
+    
+    if (testResult) {
+      console.log('✅ Соединение с ботом УСПЕШНО установлено!');
+      console.log('🔔 Уведомления о заказах будут работать корректно.');
+    } else {
+      console.log('⚠️ Соединение есть, но уведомления могут не доходить');
+    }
+    
+    console.log('====================================================');
+    return testResult;
+    
+  } catch (error) {
+    console.error('❌ ОШИБКА соединения с ботом:', error.message);
+    console.log('⚠️ Уведомления о заказах НЕ будут работать!');
+    console.log('====================================================');
     return false;
   }
 }
@@ -313,13 +453,16 @@ app.get("/api/admin/products", async (req, res) => {
 
 // =========== ЗАКАЗЫ API ===========
 
-// Отправка email (обновленный с уведомлением)
+// Отправка email (ОБНОВЛЕННЫЙ С УВЕДОМЛЕНИЕМ БОТУ)
 app.post("/submit-email", async (req, res) => {
   try {
     const { order_id, email, cart } = req.body;
     
-    console.log(`📧 Email для заказа ${order_id}: ${email}`);
+    console.log(`📧 =========== ПОЛУЧЕН EMAIL ДЛЯ ЗАКАЗА ===========`);
+    console.log(`🆔 Заказ: ${order_id}`);
+    console.log(`📧 Email: ${email}`);
     console.log(`🛒 Корзина:`, cart);
+    console.log(`===================================================`);
     
     if (!order_id || !email || !cart) {
       return res.status(400).json({ 
@@ -363,22 +506,26 @@ app.post("/submit-email", async (req, res) => {
     
     console.log(`✅ Email сохранен для заказа ${order_id}`);
     
-    // Отправляем первое уведомление боту (без кода)
-    await notifyBot({
+    // ОТПРАВЛЯЕМ УВЕДОМЛЕНИЕ БОТУ
+    console.log(`📤 Отправляю уведомление боту о вводе email...`);
+    const botNotified = await notifyBot({
       order_id,
       email,
-      items: cart,
+      cart,
       amount: amount,
       code: null,
       stage: "email_submitted"
     });
+    
+    console.log(`📤 Результат уведомления бота: ${botNotified ? '✅ Успешно' : '❌ Ошибка'}`);
     
     res.json({ 
       success: true, 
       message: "Email сохранен",
       order_id,
       email,
-      amount 
+      amount,
+      bot_notified: botNotified
     });
     
   } catch (error) {
@@ -390,7 +537,7 @@ app.post("/submit-email", async (req, res) => {
   }
 });
 
-// Отправка кода на проверку
+// Отправка кода на проверку (ОБНОВЛЕННЫЙ С УВЕДОМЛЕНИЕМ БОТУ)
 app.post("/api/submit-code", async (req, res) => {
   try {
     const { order_id, email, code } = req.body;
@@ -402,7 +549,11 @@ app.post("/api/submit-code", async (req, res) => {
       });
     }
     
-    console.log(`🔢 Код для заказа ${order_id}: ${code}`);
+    console.log(`🔢 =========== ПОЛУЧЕН КОД ДЛЯ ЗАКАЗА ===========`);
+    console.log(`🆔 Заказ: ${order_id}`);
+    console.log(`📧 Email: ${email}`);
+    console.log(`🔢 Код: ${code}`);
+    console.log(`=================================================`);
     
     await db.read();
     
@@ -434,8 +585,9 @@ app.post("/api/submit-code", async (req, res) => {
     
     console.log(`✅ Код сохранен для заказа ${order_id}`);
     
-    // Отправляем второе уведомление боту (с кодом)
-    await notifyBot({
+    // ОТПРАВЛЯЕМ УВЕДОМЛЕНИЕ БОТУ (С КОДОМ)
+    console.log(`📤 Отправляю уведомление боту о вводе кода...`);
+    const botNotified = await notifyBot({
       order_id,
       email,
       items: db.data.orders[orderIndex].cart,
@@ -444,12 +596,15 @@ app.post("/api/submit-code", async (req, res) => {
       stage: "code_submitted"
     });
     
+    console.log(`📤 Результат уведомления бота: ${botNotified ? '✅ Успешно' : '❌ Ошибка'}`);
+    
     res.json({ 
       success: true, 
       message: "Код отправлен на проверку",
       order_id,
       status: "pending",
-      next_check: Date.now() + 5000 // Подсказка фронтенду когда проверять статус
+      next_check: Date.now() + 5000,
+      bot_notified: botNotified
     });
     
   } catch (error) {
@@ -522,6 +677,7 @@ app.post("/api/order-status-update", async (req, res) => {
     
     // Проверка секрета
     if (secret !== API_SECRET) {
+      console.log(`❌ Неверный секрет от бота: ${secret}`);
       return res.status(401).json({ 
         success: false, 
         error: "Неавторизовано" 
@@ -535,13 +691,18 @@ app.post("/api/order-status-update", async (req, res) => {
       });
     }
     
-    console.log(`🔄 Обновление статуса заказа ${order_id}: ${status}`);
+    console.log(`🔄 =========== ОБНОВЛЕНИЕ СТАТУСА ЗАКАЗА ===========`);
+    console.log(`🆔 Заказ: ${order_id}`);
+    console.log(`📊 Новый статус: ${status}`);
+    console.log(`💬 Комментарий: ${admin_comment || 'нет'}`);
+    console.log(`====================================================`);
     
     await db.read();
     
     const orderIndex = db.data.orders.findIndex(o => o.id === order_id);
     
     if (orderIndex === -1) {
+      console.log(`❌ Заказ ${order_id} не найден в базе`);
       return res.status(404).json({ 
         success: false, 
         error: "Заказ не найден" 
@@ -559,11 +720,13 @@ app.post("/api/order-status-update", async (req, res) => {
     // Если статус завершен, добавляем дату выполнения
     if (status === "completed") {
       db.data.orders[orderIndex].completed_at = new Date().toISOString();
+      console.log(`✅ Заказ ${order_id} отмечен как выполненный`);
     }
     
     // Если статус отклонен
     if (status === "rejected") {
       db.data.orders[orderIndex].rejected_at = new Date().toISOString();
+      console.log(`❌ Заказ ${order_id} отмечен как отклоненный`);
     }
     
     await db.write();
@@ -644,6 +807,49 @@ app.get("/api/admin/orders", async (req, res) => {
     res.status(500).json({ 
       success: false,
       error: "Ошибка сервера" 
+    });
+  }
+});
+
+// Эндпоинт для тестирования уведомлений
+app.post("/api/test-notification", async (req, res) => {
+  try {
+    const { secret } = req.body;
+    
+    if (secret !== API_SECRET) {
+      return res.status(401).json({ 
+        success: false, 
+        error: "Unauthorized" 
+      });
+    }
+    
+    console.log("🔔 =========== ТЕСТОВОЕ УВЕДОМЛЕНИЕ ===========");
+    
+    const testResult = await notifyBot({
+      order_id: `test_${Date.now()}`,
+      email: "test@example.com",
+      cart: { c30: 2, c80: 1 },
+      amount: 950,
+      code: "123456",
+      stage: "test_notification"
+    });
+    
+    res.json({
+      success: true,
+      bot_notified: testResult,
+      message: testResult ? "Тестовое уведомление отправлено" : "Не удалось отправить уведомление",
+      bot_url: BOT_URL,
+      api_secret_set: !!API_SECRET,
+      timestamp: new Date().toISOString()
+    });
+    
+    console.log(`📤 Результат теста: ${testResult ? '✅ Успешно' : '❌ Ошибка'}`);
+    console.log("==============================================");
+    
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
     });
   }
 });
@@ -760,6 +966,14 @@ app.post("/bilee-notify", (req, res) => {
 
 // =========== ГЛАВНАЯ СТРАНИЦА ===========
 app.get("/", (req, res) => {
+  const botConnectionStatus = BOT_URL && API_SECRET ? 
+    `<div class="success">🤖 Бот: ✅ Настроен (${BOT_URL})</div>` : 
+    '<div class="warning">🤖 Бот: ❌ Не настроен (уведомления не работают)</div>';
+  
+  const apiSecretStatus = API_SECRET ? 
+    '<div class="success">🔐 API_SECRET: ✅ Установлен</div>' : 
+    '<div class="warning">🔐 API_SECRET: ❌ Не установлен</div>';
+  
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -821,12 +1035,36 @@ app.get("/", (req, res) => {
           font-weight: bold;
           color: #4FC3F7;
         }
+        .success {
+          background: rgba(76, 175, 80, 0.2);
+          border-left: 4px solid #4CAF50;
+          padding: 10px;
+          margin: 10px 0;
+          border-radius: 5px;
+        }
+        .warning {
+          background: rgba(255, 152, 0, 0.2);
+          border-left: 4px solid #ff9800;
+          padding: 10px;
+          margin: 10px 0;
+          border-radius: 5px;
+        }
+        .error {
+          background: rgba(244, 67, 54, 0.2);
+          border-left: 4px solid #f44336;
+          padding: 10px;
+          margin: 10px 0;
+          border-radius: 5px;
+        }
       </style>
     </head>
     <body>
       <div class="container">
         <h1>🦆 Duck Shop Backend</h1>
         <div class="status">✅ Статус: Работает</div>
+        
+        ${botConnectionStatus}
+        ${apiSecretStatus}
         
         <div class="card">
           <h3>📊 Статистика системы:</h3>
@@ -856,7 +1094,7 @@ app.get("/", (req, res) => {
           </div>
           <div class="stat-item">
             <span>🔧 Версия API:</span>
-            <span class="stat-value">3.0.0</span>
+            <span class="stat-value">4.0.0 (с уведомлениями)</span>
           </div>
           <div class="stat-item">
             <span>⏰ Время:</span>
@@ -871,11 +1109,12 @@ app.get("/", (req, res) => {
               <h4>🛍️ Для сайта:</h4>
               <ul>
                 <li><a href="/api/products" target="_blank">/api/products</a> - Все товары</li>
-                <li>POST /submit-email - Сохранить email</li>
-                <li>POST /api/submit-code - Отправить код</li>
+                <li>POST /submit-email - Сохранить email (+бот)</li>
+                <li>POST /api/submit-code - Отправить код (+бот)</li>
                 <li>GET /api/order-status/:id - Статус заказа</li>
                 <li><a href="/check" target="_blank">/check</a> - Статус сервера</li>
                 <li>POST /create-payment - Создать платеж</li>
+                <li><a href="/test-connection" target="_blank">/test-connection</a> - Тест бота</li>
               </ul>
             </div>
             <div>
@@ -886,6 +1125,7 @@ app.get("/", (req, res) => {
                 <li>GET /api/admin/products - Список товаров</li>
                 <li>GET /api/admin/orders - Список заказов</li>
                 <li>POST /api/order-status-update - Обновить статус</li>
+                <li>POST /api/test-notification - Тест уведомлений</li>
               </ul>
             </div>
           </div>
@@ -894,10 +1134,11 @@ app.get("/", (req, res) => {
         <div class="card">
           <h3>🔄 Интеграции:</h3>
           <ul>
-            <li><strong>🤖 Бот:</strong> ${BOT_URL ? '✅ Подключен' : '❌ Не настроен'}</li>
+            <li><strong>🤖 Бот:</strong> ${BOT_URL ? `✅ ${BOT_URL}` : '❌ Не настроен'}</li>
             <li><strong>💳 BileePay:</strong> ${SHOP_ID > 0 ? '✅ Настроены' : '❌ Не настроены'}</li>
             <li><strong>📧 Уведомления:</strong> ${BOT_URL && API_SECRET ? '✅ Активны' : '❌ Не активны'}</li>
             <li><strong>🔐 Безопасность:</strong> ${API_SECRET ? '✅ Включена' : '❌ Отключена'}</li>
+            <li><strong>📊 База данных:</strong> ✅ LowDB (${db.data.products.length} товаров, ${db.data.orders.length} заказов)</li>
           </ul>
         </div>
         
@@ -906,16 +1147,18 @@ app.get("/", (req, res) => {
           <ul>
             <li><a href="https://destrkod.github.io/duck" target="_blank">🛒 Магазин (Сайт)</a></li>
             <li><a href="${BOT_URL || '#'}" target="_blank">🤖 Панель бота</a></li>
+            <li><a href="${RENDER_URL}/test-connection" target="_blank">🔧 Тест соединения с ботом</a></li>
             <li><a href="https://render.com" target="_blank">⚙️ Render Dashboard</a></li>
             <li><a href="https://github.com/DESTRKOD/duck-backend" target="_blank">📦 GitHub репозиторий</a></li>
           </ul>
         </div>
         
         <p style="margin-top: 30px; color: rgba(255,255,255,0.7); font-size: 14px;">
-          🔄 Система уведомлений: ${BOT_URL && API_SECRET ? '✅ Активна' : '⚠️ Требует настройки'}<br>
+          🔄 Система уведомлений: ${BOT_URL && API_SECRET ? '✅ АКТИВНА' : '⚠️ ТРЕБУЕТ НАСТРОЙКИ'}<br>
           📊 Заказы в реальном времени: ✅ Работает<br>
-          💳 Платежная система: ${SHOP_ID > 0 ? '✅ Готова' : '⚠️ Требует shop_id/password'}<br>
-          🔐 Безопасность API: ✅ Включена
+          💳 Платежная система: ${SHOP_ID > 0 ? '✅ ГОТОВА' : '⚠️ ТРЕБУЕТ shop_id/password'}<br>
+          🔐 Безопасность API: ✅ Включена<br>
+          🚀 Уведомления о email и кодах: ${BOT_URL && API_SECRET ? '✅ АВТОМАТИЧЕСКИЕ' : '❌ НЕ РАБОТАЮТ'}
         </p>
       </div>
     </body>
@@ -932,22 +1175,18 @@ app.get("/check", async (req, res) => {
   
   res.json({
     status: "ok",
-    server: "Duck Shop Backend v3.0",
+    server: "Duck Shop Backend v4.0 (with bot notifications)",
     shop_id: SHOP_ID,
     password_set: !!BILEE_PASSWORD,
     products_count: db.data.products.length,
     orders_count: db.data.orders.length,
     pending_orders: pendingOrders,
     completed_orders: completedOrders,
-    security: "enabled",
-    integrations: {
-      bot: !!BOT_URL,
-      payments: SHOP_ID > 0,
-      notifications: !!(BOT_URL && API_SECRET)
-    },
+    bot_url: BOT_URL,
+    api_secret_set: !!API_SECRET,
+    bot_connection: BOT_URL && API_SECRET ? "configured" : "not_configured",
     time: new Date().toISOString(),
     url: RENDER_URL,
-    bot_url: BOT_URL,
     endpoints: {
       products: `${RENDER_URL}/api/products`,
       order_status: `${RENDER_URL}/api/order-status/{id}`,
@@ -957,13 +1196,29 @@ app.get("/check", async (req, res) => {
   });
 });
 
+// Тест соединения с ботом
+app.get("/test-connection", async (req, res) => {
+  const botConnected = await checkBotConnection();
+  
+  res.json({
+    success: true,
+    bot_connected: botConnected,
+    bot_url: BOT_URL,
+    api_secret: API_SECRET ? "configured" : "not_configured",
+    timestamp: new Date().toISOString(),
+    message: botConnected ? 
+      "✅ Бот доступен и уведомления работают!" : 
+      "❌ Проблемы с соединением с ботом"
+  });
+});
+
 // =========== ТЕСТ СОЕДИНЕНИЯ ===========
 app.get("/test", (req, res) => {
   res.json({
     success: true,
     message: "✅ Сервер работает корректно",
     timestamp: new Date().toISOString(),
-    version: "3.0.0",
+    version: "4.0.0",
     features: {
       products_api: true,
       orders_api: true,
@@ -1065,6 +1320,7 @@ app.post("/api/cleanup", async (req, res) => {
 // =========== ЗАПУСК СЕРВЕРА ===========
 app.listen(PORT, "0.0.0.0", async () => {
   console.log(`✅ Сервер запущен на порту ${PORT}`);
+  console.log(`🔧 =========== НАСТРОЙКИ СЕРВЕРА ===========`);
   console.log(`🛒 Shop ID: ${SHOP_ID ? '✅ ' + SHOP_ID : '❌ Не настроен'}`);
   console.log(`💳 BileePay: ${SHOP_ID > 0 && BILEE_PASSWORD ? '✅ Настроен' : '❌ Требует настройки'}`);
   console.log(`🤖 Бот URL: ${BOT_URL ? '✅ ' + BOT_URL : '❌ Не настроен'}`);
@@ -1075,8 +1331,8 @@ app.listen(PORT, "0.0.0.0", async () => {
   console.log(`🛍️ API товаров: ${RENDER_URL}/api/products`);
   console.log(`💸 Платежный API: ${RENDER_URL}/create-payment`);
   console.log(`🔓 Безопасность: Проверка secret включена`);
-  console.log(`🔄 Уведомления боту: ${BOT_URL && API_SECRET ? '✅ Активны' : '❌ Не активны'}`);
-  console.log(`🚀 Готов к работе!`);
+  console.log(`🔄 Уведомления боту: ${BOT_URL && API_SECRET ? '✅ Будут работать' : '❌ НЕ БУДУТ работать'}`);
+  console.log(`============================================`);
   
   // Автоматическое создание тестовых товаров если база пустая
   await db.read();
@@ -1089,4 +1345,12 @@ app.listen(PORT, "0.0.0.0", async () => {
     await db.write();
     console.log(`✅ Создано ${db.data.products.length} тестовых товаров`);
   }
+  
+  // Проверка соединения с ботом
+  setTimeout(async () => {
+    await checkBotConnection();
+  }, 3000);
+  
+  console.log(`🚀 СЕРВЕР ГОТОВ К РАБОТЕ 24/7!`);
+  console.log(`📧 Уведомления о заказах: ${BOT_URL && API_SECRET ? '✅ ВКЛЮЧЕНЫ' : '❌ ОТКЛЮЧЕНЫ'}`);
 });
