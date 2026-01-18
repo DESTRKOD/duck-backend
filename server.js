@@ -83,6 +83,28 @@ async function notifyBot(orderData) {
   }
 }
 
+// =========== ГЕНЕРАЦИЯ ПОДПИСИ ДЛЯ BILEEPAY ===========
+function generateSignatureNode(data, password) {
+  const tokenData = {
+    ...data,
+    password: password
+  };
+  
+  const excludedKeys = ["metadata", "signature"];
+  
+  const sortedKeys = Object.keys(tokenData)
+    .filter((key) => !excludedKeys.includes(key))
+    .sort();
+  
+  const valuesString = sortedKeys
+    .map((key) => tokenData[key])
+    .join("");
+  
+  const hash = crypto.createHash("sha256");
+  hash.update(valuesString, "utf8");
+  return hash.digest("hex");
+}
+
 // =========== ПРОДУКТЫ API ===========
 
 // Получить все товары для сайта
@@ -626,6 +648,116 @@ app.get("/api/admin/orders", async (req, res) => {
   }
 });
 
+// =========== ПЛАТЕЖНАЯ СИСТЕМА BILEEPAY ===========
+app.post("/create-payment", async (req, res) => {
+  try {
+    const { items, method } = req.body;
+    
+    if (!items || !method) {
+      return res.status(400).json({ error: "Требуются items и method" });
+    }
+    
+    if (!SHOP_ID || !BILEE_PASSWORD) {
+      return res.status(500).json({ 
+        error: "Не настроены shop_id или password" 
+      });
+    }
+    
+    // Рассчитываем сумму
+    const amountRub = calculateOrderTotal(items);
+    
+    if (amountRub === 0) {
+      return res.status(400).json({ error: "Сумма заказа 0" });
+    }
+    
+    // Проверяем лимит корзины
+    const maxCartTotal = db.data.settings.max_cart_total || 10000;
+    if (amountRub > maxCartTotal) {
+      return res.status(400).json({ 
+        error: `Сумма заказа превышает лимит ${maxCartTotal}₽` 
+      });
+    }
+    
+    const order_id = `duck_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Создаем предварительный заказ в базе
+    await db.read();
+    
+    const newOrder = {
+      id: order_id,
+      cart: items,
+      amount: amountRub,
+      status: "created",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    db.data.orders.push(newOrder);
+    await db.write();
+    
+    const payload = {
+      order_id,
+      method_slug: method,
+      amount: amountRub, 
+      shop_id: SHOP_ID,
+      success_url: `${FRONTEND_URL}/success-pay.html?order=${order_id}`,
+      fail_url: `${FRONTEND_URL}/fail.html`,
+      description: `Заказ #${order_id.substring(0, 8)}`,
+      notify_url: `${RENDER_URL}/bilee-notify`
+    };
+    
+    payload.signature = generateSignatureNode(payload, BILEE_PASSWORD);
+    
+    const response = await axios.post(
+      `${BILEE_API}/payment/init`,
+      payload,
+      { 
+        timeout: 15000,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+    
+    if (response.data && response.data.url) {
+      res.json({
+        success: true,
+        url: response.data.url,
+        order_id,
+        amount: amountRub
+      });
+    } else {
+      throw new Error("BileePay не вернул URL");
+    }
+    
+  } catch (error) {
+    console.error("💥 Ошибка создания платежа:", error.message);
+    
+    if (error.response) {
+      res.status(500).json({
+        error: `BileePay ошибка ${error.response.status}`,
+        details: error.response.data
+      });
+    } else {
+      res.status(500).json({
+        error: "Ошибка сервера",
+        details: error.message
+      });
+    }
+  }
+});
+
+// Уведомление от BileePay
+app.post("/bilee-notify", (req, res) => {
+  console.log("📦 Уведомление от BileePay:", req.body);
+  
+  // Здесь можно обновить статус заказа в базе
+  // если платежная система присылает ID заказа
+  
+  res.status(200).json({ 
+    success: true,
+    message: "OK" 
+  });
+});
+
 // =========== ГЛАВНАЯ СТРАНИЦА ===========
 app.get("/", (req, res) => {
   res.send(`
@@ -743,6 +875,7 @@ app.get("/", (req, res) => {
                 <li>POST /api/submit-code - Отправить код</li>
                 <li>GET /api/order-status/:id - Статус заказа</li>
                 <li><a href="/check" target="_blank">/check</a> - Статус сервера</li>
+                <li>POST /create-payment - Создать платеж</li>
               </ul>
             </div>
             <div>
@@ -762,7 +895,7 @@ app.get("/", (req, res) => {
           <h3>🔄 Интеграции:</h3>
           <ul>
             <li><strong>🤖 Бот:</strong> ${BOT_URL ? '✅ Подключен' : '❌ Не настроен'}</li>
-            <li><strong>💳 Платежи:</strong> ${SHOP_ID > 0 ? '✅ Настроены' : '❌ Не настроены'}</li>
+            <li><strong>💳 BileePay:</strong> ${SHOP_ID > 0 ? '✅ Настроены' : '❌ Не настроены'}</li>
             <li><strong>📧 Уведомления:</strong> ${BOT_URL && API_SECRET ? '✅ Активны' : '❌ Не активны'}</li>
             <li><strong>🔐 Безопасность:</strong> ${API_SECRET ? '✅ Включена' : '❌ Отключена'}</li>
           </ul>
@@ -781,6 +914,7 @@ app.get("/", (req, res) => {
         <p style="margin-top: 30px; color: rgba(255,255,255,0.7); font-size: 14px;">
           🔄 Система уведомлений: ${BOT_URL && API_SECRET ? '✅ Активна' : '⚠️ Требует настройки'}<br>
           📊 Заказы в реальном времени: ✅ Работает<br>
+          💳 Платежная система: ${SHOP_ID > 0 ? '✅ Готова' : '⚠️ Требует shop_id/password'}<br>
           🔐 Безопасность API: ✅ Включена
         </p>
       </div>
@@ -817,6 +951,7 @@ app.get("/check", async (req, res) => {
     endpoints: {
       products: `${RENDER_URL}/api/products`,
       order_status: `${RENDER_URL}/api/order-status/{id}`,
+      create_payment: `${RENDER_URL}/create-payment`,
       admin_orders: `${RENDER_URL}/api/admin/orders?secret={API_SECRET}`
     }
   });
@@ -848,138 +983,6 @@ app.get("/test", (req, res) => {
       github: "https://github.com/DESTRKOD/duck-backend",
       frontend: "https://destrkod.github.io/duck"
     }
-  });
-});
-
-// =========== ГЕНЕРАЦИЯ ПОДПИСИ ===========
-function generateSignatureNode(data, password) {
-  const tokenData = {
-    ...data,
-    password: password
-  };
-  
-  const excludedKeys = ["metadata", "signature"];
-  
-  const sortedKeys = Object.keys(tokenData)
-    .filter((key) => !excludedKeys.includes(key))
-    .sort();
-  
-  const valuesString = sortedKeys
-    .map((key) => tokenData[key])
-    .join("");
-  
-  const hash = crypto.createHash("sha256");
-  hash.update(valuesString, "utf8");
-  return hash.digest("hex");
-}
-
-// =========== ПЛАТЕЖНАЯ СИСТЕМА ===========
-app.post("/create-payment", async (req, res) => {
-  try {
-    const { items, method } = req.body;
-    
-    if (!items || !method) {
-      return res.status(400).json({ error: "Требуются items и method" });
-    }
-    
-    if (!SHOP_ID || !BILEE_PASSWORD) {
-      return res.status(500).json({ 
-        error: "Не настроены shop_id или password" 
-      });
-    }
-    
-    // Рассчитываем сумму
-    const amountRub = calculateOrderTotal(items);
-    
-    if (amountRub === 0) {
-      return res.status(400).json({ error: "Сумма заказа 0" });
-    }
-    
-    // Проверяем лимит корзины
-    const maxCartTotal = db.data.settings.max_cart_total || 10000;
-    if (amountRub > maxCartTotal) {
-      return res.status(400).json({ 
-        error: `Сумма заказа превышает лимит ${maxCartTotal}₽` 
-      });
-    }
-    
-    const order_id = `duck_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Создаем предварительный заказ в базе
-    await db.read();
-    
-    const newOrder = {
-      id: order_id,
-      cart: items,
-      amount: amountRub,
-      status: "created",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    
-    db.data.orders.push(newOrder);
-    await db.write();
-    
-    const payload = {
-      order_id,
-      method_slug: method,
-      amount: amountRub, 
-      shop_id: SHOP_ID,
-      success_url: `${FRONTEND_URL}/success-pay.html?order=${order_id}`,
-      fail_url: `${FRONTEND_URL}/fail.html`,
-      description: `Заказ #${order_id.substring(0, 8)}`,
-      notify_url: `${RENDER_URL}/bilee-notify`
-    };
-    
-    payload.signature = generateSignatureNode(payload, BILEE_PASSWORD);
-    
-    const response = await axios.post(
-      `${BILEE_API}/payment/init`,
-      payload,
-      { 
-        timeout: 15000,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
-    
-    if (response.data && response.data.url) {
-      res.json({
-        success: true,
-        url: response.data.url,
-        order_id,
-        amount: amountRub
-      });
-    } else {
-      throw new Error("BileePay не вернул URL");
-    }
-    
-  } catch (error) {
-    console.error("💥 Ошибка создания платежа:", error.message);
-    
-    if (error.response) {
-      res.status(500).json({
-        error: `BileePay ошибка ${error.response.status}`,
-        details: error.response.data
-      });
-    } else {
-      res.status(500).json({
-        error: "Ошибка сервера",
-        details: error.message
-      });
-    }
-  }
-});
-
-// Уведомление от BileePay
-app.post("/bilee-notify", (req, res) => {
-  console.log("📦 Уведомление от BileePay:", req.body);
-  
-  // Здесь можно обновить статус заказа в базе
-  // если платежная система присылает ID заказа
-  
-  res.status(200).json({ 
-    success: true,
-    message: "OK" 
   });
 });
 
@@ -1063,12 +1066,14 @@ app.post("/api/cleanup", async (req, res) => {
 app.listen(PORT, "0.0.0.0", async () => {
   console.log(`✅ Сервер запущен на порту ${PORT}`);
   console.log(`🛒 Shop ID: ${SHOP_ID ? '✅ ' + SHOP_ID : '❌ Не настроен'}`);
+  console.log(`💳 BileePay: ${SHOP_ID > 0 && BILEE_PASSWORD ? '✅ Настроен' : '❌ Требует настройки'}`);
   console.log(`🤖 Бот URL: ${BOT_URL ? '✅ ' + BOT_URL : '❌ Не настроен'}`);
   console.log(`🔐 API Secret: ${API_SECRET ? '✅ Установлен' : '❌ Не установлен'}`);
   console.log(`🗄️ Товаров в базе: ${db.data.products.length}`);
   console.log(`📦 Заказов в базе: ${db.data.orders.length}`);
   console.log(`🌐 URL: ${RENDER_URL}`);
   console.log(`🛍️ API товаров: ${RENDER_URL}/api/products`);
+  console.log(`💸 Платежный API: ${RENDER_URL}/create-payment`);
   console.log(`🔓 Безопасность: Проверка secret включена`);
   console.log(`🔄 Уведомления боту: ${BOT_URL && API_SECRET ? '✅ Активны' : '❌ Не активны'}`);
   console.log(`🚀 Готов к работе!`);
