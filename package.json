@@ -1,12 +1,15 @@
 {
   "name": "duck-backend",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "axios": "^1.6.0",
+    "lowdb": "^6.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
