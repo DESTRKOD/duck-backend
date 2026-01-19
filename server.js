@@ -13,46 +13,29 @@ const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 10000;
 
 const CONFIG = {
-  // Платежная система
   SHOP_ID: Number(process.env.SHOP_ID) || 0,
   BILEE_PASSWORD: process.env.BILEE_PASSWORD || "",
   BILEE_API: process.env.BILEE_API_URL || "https://paymentgate.bilee.ru/api",
-  
-  // Безопасность
   API_SECRET: process.env.API_SECRET || "",
-  
-  // URL
   SERVER_URL: process.env.SERVER_URL || `https://duck-backend-by9a.onrender.com`,
   FRONTEND_URL: process.env.FRONTEND_URL || "https://destrkod.github.io/duck",
   BOT_URL: process.env.BOT_URL || "",
-  
-  // Настройки
   CREATE_TEST_PRODUCTS: process.env.CREATE_TEST_PRODUCTS === 'true',
   MAX_CART_TOTAL: Number(process.env.MAX_CART_TOTAL) || 10000
 };
 
-
-// =========== FIX CORS ===========
-// Установи CORS до всего остального
-app.use(cors({
-  origin: '*', // Разрешаем всем (или укажи точно: 'https://destrkod.github.io')
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-secret', 'Accept'],
-  credentials: true
-}));
-
-// Обязательно обработай OPTIONS запросы (preflight)
-app.options('*', cors());
 // =========== CORS ===========
 const app = express();
+
+// ВАЖНО: CORS должен быть ПЕРВЫМ middleware
 app.use(cors({
-  origin: ['https://destrkod.github.io', 'http://localhost:3000', 'http://localhost:5500', '*'],
+  origin: '*', // Разрешаем ВСЕМ (или конкретно: 'https://destrkod.github.io')
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-secret', 'Accept']
 }));
 
-// Обработка preflight запросов
+// OPTIONS для preflight
 app.options('*', cors());
 
 app.use(express.json());
@@ -800,4 +783,5 @@ const startServer = async () => {
 };
 
 startServer();
+
 
