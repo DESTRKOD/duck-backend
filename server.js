@@ -31,6 +31,18 @@ const CONFIG = {
   MAX_CART_TOTAL: Number(process.env.MAX_CART_TOTAL) || 10000
 };
 
+
+// =========== FIX CORS ===========
+// Установи CORS до всего остального
+app.use(cors({
+  origin: '*', // Разрешаем всем (или укажи точно: 'https://destrkod.github.io')
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-secret', 'Accept'],
+  credentials: true
+}));
+
+// Обязательно обработай OPTIONS запросы (preflight)
+app.options('*', cors());
 // =========== CORS ===========
 const app = express();
 app.use(cors({
@@ -788,3 +800,4 @@ const startServer = async () => {
 };
 
 startServer();
+
